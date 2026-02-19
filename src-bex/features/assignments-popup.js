@@ -18,6 +18,7 @@ export function injectAssignmentsPopup() {
   const assignmentsMassCorrectButtonText = "تصحيح كل ما بالصحفة";
   const assignmentsAnswersButtonText = "إجابات الطلاب";
   const assignmentsAnswersButtonTextAlt = "رصد الدرجات";
+  const finishedAssignmentsButtonText = "الواجبات المنتهية";
   const assignmentsErrorText = "لا توجد واجبات مرسلة منشأة في النظام حاليا";
   const assignmentsCorrectionTypeLabelText = "مصدر الواجب";
   const assignmentsCorrectionFromBankText = "بنك الأسئلة";
@@ -62,45 +63,51 @@ export function injectAssignmentsPopup() {
 
       const autoCorrectionPageURLs = [];
 
-      for (let type = 1; type <= 3; type++) {
-        pageNumber = 1;
-        while (true) {
-          const parentContent = await fetchLinkContent(
-            `${url}&pageNumber=${pageNumber}&searchClassRoom=0&type=${type}`
-          );
+      if (element.textContent.includes(assignmentsAnswersButtonText)) {
+        autoCorrectionPageURLs.push(url);
+      } else {
+        for (let type = 1; type <= 3; type++) {
+          for (const isDue of [true, false]) {
+            pageNumber = 1;
+            while (true) {
+              const parentContent = await fetchLinkContent(
+                `${url}&pageNumber=${pageNumber}&searchClassRoom=0&type=${type}&isDue=${isDue}`
+              );
 
-          const parentContentAsDiv = document.createElement("div");
-          parentContentAsDiv.innerHTML = parentContent;
+              const parentContentAsDiv = document.createElement("div");
+              parentContentAsDiv.innerHTML = parentContent;
 
-          const alertDivs = Array.from(
-            parentContentAsDiv.querySelectorAll("div.alert")
-          );
-          const alertDiv = alertDivs.find((alertDiv) =>
-            alertDiv.innerText.includes(assignmentsErrorText)
-          );
-          if (alertDiv) break;
+              const alertDivs = Array.from(
+                parentContentAsDiv.querySelectorAll("div.alert")
+              );
+              const alertDiv = alertDivs.find((alertDiv) =>
+                alertDiv.innerText.includes(assignmentsErrorText)
+              );
+              if (alertDiv) break;
 
-          const autoCorrectionPageURLsOnPage = findLinksWithText(
-            assignmentsAnswersButtonText,
-            parentContentAsDiv
-          );
+              const autoCorrectionPageURLsOnPage = findLinksWithText(
+                assignmentsAnswersButtonText,
+                parentContentAsDiv
+              );
 
-          const autoCorrectionPageURLsOnPageAlt = findLinksWithText(
-            assignmentsAnswersButtonTextAlt,
-            parentContentAsDiv
-          );
+              const autoCorrectionPageURLsOnPageAlt = findLinksWithText(
+                assignmentsAnswersButtonTextAlt,
+                parentContentAsDiv
+              );
 
-          autoCorrectionPageURLs.push(
-            ...autoCorrectionPageURLsOnPage.map((el) => el.href)
-          );
+              autoCorrectionPageURLs.push(
+                ...autoCorrectionPageURLsOnPage.map((el) => el.href)
+              );
 
-          autoCorrectionPageURLs.push(
-            ...autoCorrectionPageURLsOnPageAlt.map((el) => el.href)
-          );
+              autoCorrectionPageURLs.push(
+                ...autoCorrectionPageURLsOnPageAlt.map((el) => el.href)
+              );
 
-          pageNumber++;
+              pageNumber++;
 
-          break;
+              break;
+            }
+          }
         }
       }
 
@@ -255,7 +262,21 @@ export function injectAssignmentsPopup() {
 
     for (const element of elements) {
       await onQuickCorrection(element, config);
-      delay(1);
+      await delay(1);
+    }
+
+    const finishedButton = findLinksWithText(finishedAssignmentsButtonText)[0];
+
+    if (finishedButton) {
+      finishedButton.click();
+      await delay(2);
+
+      const finishedElements = findLinksWithText(assignmentsAnswersButtonText);
+
+      for (const element of finishedElements) {
+        await onQuickCorrection(element, config);
+        await delay(1);
+      }
     }
   });
 
