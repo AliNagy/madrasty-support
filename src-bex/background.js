@@ -17,8 +17,31 @@ chrome.runtime.onInstalled.addListener(() => {
 
 export default bexBackground((bridge /* , allActiveConnections */) => {
   bridge.on("log", ({ data, respond }) => {
-    console.log(`[BEX] ${data.message}`, ...(data.data || []));
+    const entries = Array.isArray(data?.data) ? data.data : [];
+    const payload = {
+      message: data?.message || "",
+      entries,
+      receivedAt: Date.now(),
+    };
+    console.log("[BEX:LOG]", payload);
     respond();
+  });
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type !== "assignments_qc_log") {
+      return undefined;
+    }
+
+    const payload = {
+      source: "runtime",
+      senderTabId: sender?.tab?.id ?? null,
+      senderUrl: sender?.url ?? sender?.tab?.url ?? null,
+      entry: message.entry ?? null,
+      receivedAt: Date.now(),
+    };
+    console.log("[BEX:RUNTIME_LOG]", payload);
+    sendResponse({ ok: true });
+    return true;
   });
 
   bridge.on("getTime", ({ respond }) => {
