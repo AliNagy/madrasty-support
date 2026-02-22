@@ -25,6 +25,10 @@ export function injectAssignmentsPopup(bridge) {
   const assignmentsMaxGradingLabelText = "درجة الواجب";
   const debugPanelId = "assignments-qc-debug-panel";
   const debugPanelStoreKey = "__AssignmentsQCLogs";
+  const debugPanelVisibilityKey = "__AssignmentsQCDebugPanelVisible";
+  const debugPanelApiKey = "__AssignmentsQCLoggerApi";
+  const debugPanelMaxEntries = 1000;
+  const debugPanelMaxRenderedEntries = 250;
 
   function hasAnsweredFields(formData) {
     for (const [key, value] of formData.entries()) {
@@ -125,10 +129,50 @@ export function injectAssignmentsPopup(bridge) {
     return win[debugPanelStoreKey];
   }
 
-  function ensureDebugPanel() {
+  function isDebugPanelVisible() {
+    return window[debugPanelVisibilityKey] === true;
+  }
+
+  function setDebugPanelVisible(isVisible) {
+    window[debugPanelVisibilityKey] = Boolean(isVisible);
+  }
+
+  function removeDebugPanelElement() {
+    const panel = document.getElementById(debugPanelId);
+    if (panel) {
+      panel.remove();
+    }
+  }
+
+  function createDebugEntryLine(entry) {
+    const line = document.createElement("div");
+    line.style.padding = "4px 6px";
+    line.style.borderRadius = "4px";
+    line.style.border = "1px solid rgba(148, 163, 184, 0.2)";
+    line.style.background = "rgba(2, 6, 23, 0.6)";
+    line.style.whiteSpace = "pre-wrap";
+    line.style.wordBreak = "break-word";
+
+    const time = new Date(entry.ts).toLocaleTimeString("en-GB", {
+      hour12: false,
+    });
+    const detailsStr =
+      entry.details && Object.keys(entry.details).length
+        ? ` ${safeStringify(entry.details)}`
+        : "";
+    line.textContent = `${time} [${entry.level}] ${entry.event}${detailsStr}`;
+    return line;
+  }
+
+  function ensureDebugPanel(options = {}) {
+    const forceCreate = Boolean(options.forceCreate);
     const existing = document.getElementById(debugPanelId);
     if (existing) {
       return existing.querySelector('[data-role="body"]');
+    }
+
+    if (!forceCreate && !isDebugPanelVisible()) {
+      return null;
     }
 
     if (!document.body) {
@@ -178,7 +222,7 @@ export function injectAssignmentsPopup(bridge) {
     clearButton.style.fontSize = "10px";
 
     const hideButton = document.createElement("button");
-    hideButton.textContent = "Hide";
+    hideButton.textContent = "Close";
     hideButton.type = "button";
     hideButton.style.cursor = "pointer";
     hideButton.style.padding = "2px 6px";
@@ -197,15 +241,14 @@ export function injectAssignmentsPopup(bridge) {
     body.style.gap = "4px";
 
     clearButton.addEventListener("click", () => {
-      body.innerHTML = "";
       const store = ensureDebugStore();
       store.length = 0;
+      body.innerHTML = "";
     });
 
     hideButton.addEventListener("click", () => {
-      const isHidden = body.style.display === "none";
-      body.style.display = isHidden ? "flex" : "none";
-      hideButton.textContent = isHidden ? "Hide" : "Show";
+      setDebugPanelVisible(false);
+      removeDebugPanelElement();
     });
 
     panel.appendChild(header);
@@ -214,35 +257,99 @@ export function injectAssignmentsPopup(bridge) {
     return body;
   }
 
+  function renderDebugPanelEntries() {
+    const body = ensureDebugPanel({ forceCreate: true });
+    if (!body) return false;
+
+    body.innerHTML = "";
+    const store = ensureDebugStore();
+    for (
+      let index = store.length - 1;
+      index >= 0 && body.children.length < debugPanelMaxRenderedEntries;
+      index--
+    ) {
+      body.appendChild(createDebugEntryLine(store[index]));
+    }
+    return true;
+  }
+
+  function showDebugPanel() {
+    setDebugPanelVisible(true);
+    const rendered = renderDebugPanelEntries();
+    safeConsole("log", "[AssignmentsQC] debug_panel_shown", {
+      rendered,
+      entries: ensureDebugStore().length,
+      ts: Date.now(),
+    });
+    return rendered;
+  }
+
+  function hideDebugPanel() {
+    setDebugPanelVisible(false);
+    removeDebugPanelElement();
+    safeConsole("log", "[AssignmentsQC] debug_panel_hidden", {
+      ts: Date.now(),
+    });
+    return true;
+  }
+
+  function clearDebugStore() {
+    const store = ensureDebugStore();
+    store.length = 0;
+    const body = ensureDebugPanel();
+    if (body) {
+      body.innerHTML = "";
+    }
+    return true;
+  }
+
+  function setupDebugPanelGlobals() {
+    setDebugPanelVisible(false);
+    removeDebugPanelElement();
+
+    const api = {
+      show: showDebugPanel,
+      hide: hideDebugPanel,
+      toggle: () => (isDebugPanelVisible() ? hideDebugPanel() : showDebugPanel()),
+      clear: clearDebugStore,
+      logs: () => [...ensureDebugStore()],
+      isVisible: () => isDebugPanelVisible(),
+    };
+
+    window[debugPanelApiKey] = api;
+    window.showAssignmentsQCLogger = api.show;
+    window.hideAssignmentsQCLogger = api.hide;
+    window.toggleAssignmentsQCLogger = api.toggle;
+    window.getAssignmentsQCLogs = api.logs;
+    window.clearAssignmentsQCLogs = api.clear;
+
+    safeConsole("log", "[AssignmentsQC] debug_panel_controls_ready", {
+      visible: api.isVisible(),
+      commands: [
+        "showAssignmentsQCLogger()",
+        "hideAssignmentsQCLogger()",
+        "toggleAssignmentsQCLogger()",
+        "getAssignmentsQCLogs()",
+        "clearAssignmentsQCLogs()",
+      ],
+      ts: Date.now(),
+    });
+  }
+
   function appendDebugEntry(entry) {
     const store = ensureDebugStore();
     store.push(entry);
-    if (store.length > 1000) {
-      store.splice(0, store.length - 1000);
+    if (store.length > debugPanelMaxEntries) {
+      store.splice(0, store.length - debugPanelMaxEntries);
     }
 
-    const body = ensureDebugPanel();
+    if (!isDebugPanelVisible()) return;
+
+    const body = ensureDebugPanel({ forceCreate: true });
     if (!body) return;
 
-    const line = document.createElement("div");
-    line.style.padding = "4px 6px";
-    line.style.borderRadius = "4px";
-    line.style.border = "1px solid rgba(148, 163, 184, 0.2)";
-    line.style.background = "rgba(2, 6, 23, 0.6)";
-    line.style.whiteSpace = "pre-wrap";
-    line.style.wordBreak = "break-word";
-
-    const time = new Date(entry.ts).toLocaleTimeString("en-GB", {
-      hour12: false,
-    });
-    const detailsStr =
-      entry.details && Object.keys(entry.details).length
-        ? ` ${safeStringify(entry.details)}`
-        : "";
-    line.textContent = `${time} [${entry.level}] ${entry.event}${detailsStr}`;
-
-    body.prepend(line);
-    while (body.children.length > 250) {
+    body.prepend(createDebugEntryLine(entry));
+    while (body.children.length > debugPanelMaxRenderedEntries) {
       body.removeChild(body.lastChild);
     }
   }
@@ -2651,6 +2758,8 @@ export function injectAssignmentsPopup(bridge) {
       isQuestionBank
     );
   }
+
+  setupDebugPanelGlobals();
 
   const assignmentIndexUrlMarkers = [
     "https://schools.madrasati.sa/Teacher/Assignments/Index",
